@@ -13,31 +13,36 @@ class trafgen : public sc_module
 public:
 	sc_port<writeI> out_port;
 	sc_uint<8> x;
+	sc_event send;
 	int runs;
 	SC_HAS_PROCESS(trafgen);
 	trafgen(sc_module_name mn, int param = 1) : sc_module(mn), runs(param)
 	{
-		SC_THREAD(send_byte);
-	}
-	void send_byte()
-	{
 		srand(time(0));
+		SC_THREAD(gen_event);
+		SC_METHOD(send_byte);
+		sensitive << send;
+
+	}
+	void gen_event()
+	{
 		for (int r = 0; r < runs; r++)
 		{
 			for (int i = 0; i < 19; i++)
 			{
 				x = (sc_uint<8>)rand() % 255;
-				write_to_fifo();
+				send.notify();
+				wait(5, SC_NS);	
 			}
 			x = 255;
-			write_to_fifo();
+			send.notify();
+			wait(5, SC_NS);	
 		}
 	}
-	void write_to_fifo()
+	void send_byte()
 	{
 		out_port->write(x);
 //		cout << "send " << x << '\n';
-		wait(5, SC_NS);	
 	}
 };
 
@@ -46,37 +51,27 @@ class receiver : public sc_module, public writeI
 public:
 	sc_fifo<sc_uint<8> > tmp_buf;
 	sc_uint<8> tmp_byte;
-
+	sc_event eop;
 	SC_HAS_PROCESS(receiver);
 	receiver(sc_module_name mn) : sc_module(mn), tmp_buf(40)
 	{
-		SC_THREAD(receive_byte);
-	}
-
-	void receive_byte()
-	{
-		while(true)
-		{
-			if (tmp_buf.num_available() < 20)
-				wait(tmp_buf.data_written_event());
-			else
-				printer();
-		}
+		SC_METHOD(printer);
+		sensitive << eop;
 	}
 
 	virtual void write(sc_uint<8> data)
 	{
+		if (data == 255)
+			eop.notify(0, SC_MS);
+		else 
 		tmp_buf.write(data);
 	}
 
 	void printer()
 	{
-		tmp_buf.read(tmp_byte);
-		while (tmp_byte != 255)
+		while (tmp_buf.nb_read(tmp_byte))
 		{
 			cout << tmp_byte << " ";
-			if (!tmp_buf.nb_read(tmp_byte))
-				break;
 		}
 		cout << '\n';
 	}
