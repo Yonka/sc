@@ -2,9 +2,16 @@
 #include "cstdlib"
 #include "ctime"
 
-SC_MODULE (trafgen) 
+class writeI: virtual public sc_interface
 {
-	sc_port<sc_fifo_out_if<sc_uint<8> > > out_port;
+public:
+	virtual void write(sc_uint<8> data) = 0;
+};
+
+class trafgen : public sc_module
+{
+public:
+	sc_port<writeI> out_port;
 	sc_uint<8> x;
 	int runs;
 	SC_HAS_PROCESS(trafgen);
@@ -34,37 +41,43 @@ SC_MODULE (trafgen)
 	}
 };
 
-SC_MODULE (receiver) 
+class receiver : public sc_module, public writeI 
 {
-	sc_port<sc_fifo_in_if<sc_uint<8> > > in_port;
+public:
 	sc_fifo<sc_uint<8> > tmp_buf;
 	sc_uint<8> tmp_byte;
-	SC_CTOR (receiver) : tmp_buf(40)
+
+	SC_HAS_PROCESS(receiver);
+	receiver(sc_module_name mn) : sc_module(mn), tmp_buf(40)
 	{
 		SC_THREAD(receive_byte);
-//		sc_fifo<sc_uint<8> > tmp_buf(40);
 	}
+
 	void receive_byte()
 	{
 		while(true)
 		{
-			tmp_byte = in_port->read();
-			if (tmp_byte == 255)
-			{
-				cout << "packet: ";
+			if (tmp_buf.num_available() < 20)
+				wait(tmp_buf.data_written_event());
+			else
 				printer();
-			}
-			else 
-			{
-				tmp_buf.write(tmp_byte);
-//				cout << "rec " << tmp_byte << '\n';
-			}
 		}
 	}
+
+	virtual void write(sc_uint<8> data)
+	{
+		tmp_buf.write(data);
+	}
+
 	void printer()
 	{
-		while (tmp_buf.nb_read(tmp_byte))
+		tmp_buf.read(tmp_byte);
+		while (tmp_byte != 255)
+		{
 			cout << tmp_byte << " ";
+			if (!tmp_buf.nb_read(tmp_byte))
+				break;
+		}
 		cout << '\n';
 	}
 };
@@ -74,9 +87,8 @@ int sc_main(int argc, char* argv[]) {
 		k = atoi(argv[1]);
 	trafgen t("t", k);
 	receiver r("r");
-	sc_fifo<sc_uint<8> > buf;
-	t.out_port(buf);
-	r.in_port(buf);
+
+	t.out_port(r);
 
 	sc_start(2000, SC_MS);
 
